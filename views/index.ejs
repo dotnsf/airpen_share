@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<title>AirPen</title>
+<script type="text/javascript" src="//code.jquery.com/jquery-2.2.4.min.js"></script>
+<script type="text/javascript">
+var isTouch = false;
+var touchData = [];
+$(function(){
+  if( window.DeviceOrientationEvent ){
+    window.addEventListener( "deviceorientation", deviceOrientation );
+  }
+
+  if( window.TouchEvent ){
+    window.addEventListener( "touchstart", touchStart );
+    window.addEventListener( "touchend", touchEnd );
+  }
+
+  $(window).on( 'load resize', function(){
+    resized();
+  });
+});
+
+var canvas_width = 200, canvas_height = 200;
+function resized(){
+  var browserWidth = window.innerWidth;
+  var browserHeight = window.innerHeight;
+
+  canvas_width = browserWidth * 0.9;
+  canvas_height = canvas_width;
+  //console.log( 'canvas_width = ' + canvas_width );
+
+  var canvas = document.getElementById( 'cv' );
+  if( canvas && canvas.getContext ){
+    canvas.width = canvas_width;
+    canvas.height = canvas_height;
+  }
+}
+
+function touchStart( e ){
+  var obj = e.changedTouches[0];
+  var touchY = obj.pageY;
+
+  //. 下半分をタッチした時のみ
+  if( touchY > ( window.innerHeight / 2 ) ){
+    isTouch = true;
+    $('#result').html( '' );
+    touchData = [];
+  }
+}
+
+function touchEnd( e ){
+  isTouch = false;
+
+  if( touchData && touchData.length > 10 ){
+    //. 描画
+    $('#result').html( '<canvas id="cv" width="' + canvas_width + '" height="' + canvas_height + '" style="display:none;"></canvas><br/><img id="resultimg"/>' );
+    var cvs = document.getElementById( "cv" );
+    var ctx = cvs.getContext( "2d" );
+    ctx.beginPath();
+
+    //. 全体を白でベタ塗り
+    ctx.fillStyle = "rgb( 255, 255, 255 )";
+    ctx.fillRect( 0, 0, canvas_width, canvas_height );
+
+    var abg = null;
+    var x, y;
+
+    //. 最初のデータ
+    abg = touchData[0];
+    x = abg['lr'];
+    y = abg['fb'];
+
+    //. 始点をマーク（緑）
+    ctx.beginPath();
+    ctx.fillStyle = "rgb( 0, 255, 0 )";
+    ctx.arc( 2 * x + canvas_width / 2, -2 * y + canvas_height / 2, 10, 0, Math.PI * 2, true );
+    ctx.fill();
+
+    //. 最後のデータ
+    abg = touchData[touchData.length-1];
+    x = abg['lr'];
+    y = abg['fb'];
+
+    //. 終点をマーク（赤）
+    ctx.beginPath();
+    ctx.fillStyle = "rgb( 255, 0, 0 )";
+    ctx.arc( 2 * x + canvas_width / 2, -2 * y + canvas_height / 2, 10, 0, Math.PI * 2, true );
+    ctx.fill();
+
+    //. もう一度、最初のデータ
+    abg = touchData[0];
+    x = abg['lr'];
+    y = abg['fb'];
+
+    //. ペンを始点に移動
+    ctx.beginPath();
+    ctx.strokeStyle = "rgb( 0, 0, 0 )";
+    ctx.lineWidth = 5;
+    ctx.moveTo( 2 * x + canvas_width / 2 , -2 * y + canvas_height / 2 );
+
+    //. ２つ目以降のデータ
+    for( var i = 1; i < touchData.length; i ++ ){
+      //. ペンの移動を繰り返す
+      abg = touchData[i];
+      x = abg['lr'];
+      y = abg['fb'];
+      ctx.lineTo( 2 * x + canvas_width / 2 , -2 * y + canvas_height / 2 );
+    }
+    ctx.stroke();
+
+    //. Canvas => Image
+    var png = cvs.toDataURL( 'image/png' );
+    document.getElementById( "resultimg" ).src = png;
+
+    //. 画像データ取得
+    png = png.replace( /^.*,/, '' );
+
+    //. バイナリ変換
+    var bin = atob( png );
+    var buffer = new Uint8Array( bin.length );
+    for( var i = 0; i < bin.length; i ++ ){
+      buffer[i] = bin.charCodeAt( i );
+    }
+    var blob = new Blob( [buffer.buffer], {
+      type: 'image/png'
+    });
+
+    //. POST
+    var formdata = new FormData();
+    formdata.append( 'image', blob );
+
+    $.ajax({
+      type: "POST",
+      url: "./image",
+      data: formdata,
+      contentType: false,
+      processData: false,
+      success: function( data, dataType ){
+        console.log( data );
+      },
+      error: function( jqXHR, textStatus, errorThrown ){
+        console.log( textStatus + ": " + errorThrown );
+      }
+    });
+
+    touchData = [];
+  }
+}
+
+function deviceOrientation( e ){
+  if( isTouch ){
+    var gamma = e.gamma; //. Left/Right
+    var beta = e.beta;   //. Front/Back
+    //var alpha = e.alpha; //. Direction
+
+    var abg = {};
+    //abg['dir'] = alpha;
+    abg['fb'] = beta;
+    abg['lr'] = gamma;
+    $('#abg_lr').html( gamma );
+    $('#abg_fb').html( beta );
+    //$('#abg_dir').html( alpha );
+
+    touchData.push( abg );
+  }
+}
+</script>
+<style type="text/css">
+html{
+  height: 100%;
+}
+
+body{
+  margin: 0;
+  height: 100%;
+}
+
+html, body{
+  text-align: center;
+  background-color: #ffffcc;
+  font-size: 20px;
+  color: #333;
+}
+
+table{
+  background-color: #ccffcc;
+}
+
+#cv{
+  border: 1px solid #333;
+}
+</style>
+</head>
+<body>
+<div>
+ <div>
+  <table border="1" cellspacing="0" width="100%">
+   <thead>
+    <tr><th width="50%">Keys</th><th>Values</th></tr>
+   </thead>
+   <tbody>
+    <tr><td>LR</td><td id="abg_lr">&nbsp;</td></tr>
+    <tr><td>FB</td><td id="abg_fb">&nbsp;</td></tr>
+   </tbody>
+  </table>
+
+  <div id="result"></div>
+ </div>
+</div>
+</body>
+</html>

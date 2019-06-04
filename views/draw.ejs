@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8"/>
+<title><%= room %></title>
+<script type="text/javascript" src="//code.jquery.com/jquery-2.2.4.min.js"></script>
+<link href="//maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" rel="stylesheet"/>
+<script src="//maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js"></script>
+<link href="//use.fontawesome.com/releases/v5.8.1/css/all.css" rel="stylesheet"/>
+<script src="/socket.io/socket.io.js"></script>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+
+<link rel="shortcut icon" href="/icon.png" type="image/png"/>
+<link rel="icon" href="/icon.png" type="image/png"/>
+<link rel="apple-touch-icon" href="/icon.png"/>
+
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black"/>
+<meta name="apple-mobile-web-app-title" content="AirPen Share"/>
+
+<!-- // OGP tags -->
+<meta property="og:title" content="AirPen Share"/>
+<meta property="og:type" content="website"/>
+<meta property="og:url" content="https://airpen-share.au-syd.mybluemix.net/"/>
+<meta property="og:image" content="https://airpen-share.au-syd.mybluemix.net/icon.png"/>
+<meta property="og:site_name" content="AirPen Share"/>
+<meta property="og:description" content="AirPen Share : リアルタイムお絵描き共有サービス"/>
+<!-- OGP tags // -->
+
+<!-- // Twitter Card -->
+<meta property="twitter:card" content="summary"/>
+<meta property="twitter:site" content="@dotnsf"/>
+<meta property="twitter:creator" content="@dotnsf"/>
+<meta property="twitter:url" content="https://airpen-share.au-syd.mybluemix.net/"/>
+<meta property="twitter:image" content="https://airpen-share.au-syd.mybluemix.net/icon.png"/>
+<meta property="twitter:title" content="AirPen Share"/>
+<meta property="twitter:description" content="AirPen Share : リアルタイムお絵描き共有サービス"/>
+<!-- Twitter Card // -->
+
+<style type="text/css">
+html, body{
+  text-align: center;
+  background-color: #fafafa;
+  font-size: 20px;
+  color: #333;
+}
+#mycanvas{
+  border: 1px solid #333;
+}
+#comment{
+  width: 100%;
+}
+</style>
+</head>
+<body>
+<h3 id="name"><%= name %></h3>
+
+<select id="select_color" name="select_color">
+  <option style="color:black;" value="transparent">透明</option>
+  <option style="color:black;" value="black" selected="selected">黒</option>
+  <option style="color:lightgray;" value="white">白</option>
+  <option style="color:red;" value="red">赤</option>
+  <option style="color:blue;" value="blue">青</option>
+  <option style="color:green;" value="green">緑</option>
+  <option style="color:yellow;" value="yellow">黄</option>
+  <option style="color:cyan;" value="cyan">空</option>
+  <option style="color:magenta;" value="magenta">紫</option>
+  <option style="color:gray;" value="gray">灰</option>
+  <option style="color:#ef8f9c;" value="#ef8f9c">ピンク</option>
+  <option style="color:#ead2ad;" value="#ead2ad">肌</option>
+  <option style="color:#7c6035;" value="#7c6035">茶</option>
+</select>
+
+<select id="select_linewidth" name="select_linewidth">
+  <option value="1">1</option>
+  <option value="2">2</option>
+  <option value="3">3</option>
+  <option value="4">4</option>
+  <option value="5" selected="selected">5</option>
+  <option value="6">6</option>
+  <option value="7">7</option>
+  <option value="8">8</option>
+  <option value="9">9</option>
+  <option value="10">10</option>
+</select>
+
+<input type="button" class="btn btn-xs btn-secondary p-0" id="setbg_btn" value="背景色" onClick="setBG();"/>
+<!--
+<a href="#" class="btn btn-xs btn-secondary p-0" id="setbg_btn" onClick="setBG();"/><i class="far fa-image"></i></a>
+-->
+<a href="#" class="btn btn-xs btn-secondary p-0" data-toggle="modal" data-target="#commentModal" id="comment_btn"><i class="fas fa-comment-dots"></i></a>
+
+<div id="canvas_div">
+  <div id="cdiv"></div>
+
+  <br/>
+  <input type="button" class="btn btn-xs" id="undo_btn" value="<" onClick="undo();" disabled="disabled"/>
+  <input type="button" class="btn btn-xs btn-warning" value="reset" onClick="resetCanvas();"/>
+  <input type="button" class="btn btn-xs btn-primary" id="save_btn" value="save" onClick="save();"/>
+  <input type="button" class="btn btn-xs" id="redo_btn" value=">" onClick="redo();" disabled="disabled"/>
+</div>
+
+<div class="modal bd-example-modal-lg fade" id="commentModal" tabindex="-1" role="dialog" aria-labbelledby="commentModal" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h4 class="modal-title" id="commentModalLabel">コメント</h4>
+      </div>
+      <div class="modal-body" id="commentmodal-body">
+        <textarea id="comment"></textarea>
+      </div>
+      <div class="modal-footer btn-center">
+        <button type="button" class="btn btn-primary modal_button" data-dismiss="modal">OK</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var uuid = generateUUID();
+var socketio = null;
+
+var base_url = location.origin + '/';
+var undos = [];
+var redos = [];
+var stroke = null; //. { color: color, width: width, xys: [] }
+var backgroundcolor = null;
+
+var borderWidth = 1;
+var isTouch = false;
+var touchData = [];
+
+//. 参考: https://gist.github.com/Cartman0/436459b9b85cfdd1ca9c
+$(function(){
+  //. ヒストリバック無効化
+  if( window.history && window.history.pushState ){
+    history.pushState( "nohb", null, null );
+    $(window).on( "popState", function( evt ){
+      if( !event.originalEvent.state ){
+        history.pushState( "nohb", null, null );
+        return;
+      }
+    });
+  }
+
+  //. モーダル終了時
+  $('#commentModal').on( 'hidden.bs.modal', function(){
+    sendImage();
+  });
+
+<% if( !save ){ %>
+  $('#save_btn').addClass( 'btn-secondary' );
+  $('#save_btn').prop( 'disabled', true );
+<% } %>
+
+
+  socketio = io.connect();
+
+  init();
+});
+
+function init(){
+  $('#comment').html( '' );
+  $('#cdiv').html( '<canvas width="80%" height="50%" id="mycanvas"></canvas>' );
+
+  var canvas = document.getElementById( 'mycanvas' );
+  if( !canvas || !canvas.getContext ){
+    return false;
+  }
+  var ctx = canvas.getContext( '2d' );
+
+  if( window.DeviceOrientationEvent ){
+    window.addEventListener( "deviceorientation", deviceOrientation );
+  }
+
+  if( window.TouchEvent ){
+    canvas.addEventListener( "touchstart", touchStart );
+    canvas.addEventListener( "touchend", touchEnd );
+  }
+
+  $('#select_color').change( function(){
+    var color = $(this).val();
+    if( color == 'white' ){
+      color = 'lightgray';
+    }else if( color == 'transparent' ){
+      color = 'black';
+    }
+    $(this).css( { 'color': color } );
+    $('#select_linewidth').css( { 'color': color } );
+    $('#setbg_btn').css( { 'background': color } );
+  });
+
+  //. リサイズ時に Canvas サイズを変更する
+  $(window).on( 'load resize', function(){
+    resized();
+  });
+
+  //. スクロール禁止
+  /*
+  $(window).on('touchmove.noScroll', function( e ){
+    e.preventDefault();
+  });
+  */
+  var movefun = function( event ){
+    event.preventDefault();
+  }
+  window.addEventListener( 'touchmove', movefun, { passive: false } );
+}
+
+var canvas_width = 0;
+var canvas_height = 0;
+function resized(){
+  var browserWidth = window.innerWidth;
+  var browserHeight = window.innerHeight;
+  var canvas = document.getElementById( 'mycanvas' );
+  if( canvas && canvas.getContext ){
+    canvas.width = canvas_width = browserWidth * 0.8;
+    canvas.height = canvas_height = browserHeight * 0.6;
+
+    //. 初期化を通知
+    var name = $('#name').text();
+    var msg = {
+      uuid: uuid,
+      room: '<%= room %>',
+      name: name,
+      width: canvas_width,
+      height: canvas_height
+    };
+    socketio.json.emit( 'init_client', msg );
+  }
+}
+
+function touchStart( e ){
+  var obj = e.changedTouches[0];
+  var touchY = obj.pageY;
+
+  isTouch = true;
+  touchData = [];
+
+  stroke = {};
+  stroke.color = $('#select_color').val();
+  stroke.width = parseInt( $('#select_linewidth').val() );
+  stroke.xys = [];
+}
+
+function touchEnd( e ){
+  isTouch = false;
+
+  if( touchData && touchData.length > 0 ){
+    //. 描画
+    var canvas = document.getElementById( "mycanvas" );
+    var ctx = canvas.getContext( "2d" );
+
+    var color = $('#select_color').val();
+    if( color == 'transparent' ){
+      ctx.globalCompositeOperation = 'destination-out';
+    }else{
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    //. 描画
+    ctx.beginPath();
+    ctx.lineWidth = parseInt( $('#select_linewidth').val() );
+    ctx.lineCap = 'round';
+    ctx.moveTo( 2 * touchData[0]['lr'] + canvas_width / 2, -2 * touchData[0]['fb'] + canvas_height / 2 );
+    for( var i = 1; i < touchData.length; i ++ ){
+      ctx.lineTo( 2 * touchData[i]['lr'] + canvas_width / 2, -2 * touchData[i]['fb'] + canvas_height / 2 );
+      if( color != 'transparent' ){
+        ctx.strokeStyle = color;
+      }
+    }
+    ctx.stroke();
+
+    sendImage();
+
+    touchData = [];
+
+    if( stroke ){
+      undos.push( stroke );
+      $('#undo_btn').prop( 'disabled', false );
+      stroke = null;
+      redos = [];
+      $('#redo_btn').prop( 'disabled', true );
+    }
+  }
+}
+
+function deviceOrientation( e ){
+  if( isTouch ){
+    var gamma = e.gamma; //. Left/Right
+    var beta = e.beta;   //. Front/Back
+    //var alpha = e.alpha; //. Direction
+
+    var abg = {};
+    //abg['dir'] = alpha;
+    abg['fb'] = beta;
+    abg['lr'] = gamma;
+    $('#abg_lr').html( gamma );
+    $('#abg_fb').html( beta );
+    //$('#abg_dir').html( alpha );
+
+    touchData.push( abg );
+
+    if( stroke ){
+      stroke.xys.push( [ 2 * abg['lr'] + canvas_width / 2, -2 * abg['fb'] + canvas_height / 2 ] );
+    }
+  }
+}
+
+function resetCanvas( no_reset_unredo ){
+  init();
+  resized();
+
+  if( !no_reset_unredo ){
+    undos = [];
+    redos = [];
+    backgroundcolor = null;
+
+    //. リセットを通知
+    sendImage();
+  }
+}
+
+function isAndroid(){
+  return ( navigator.userAgent.indexOf( 'Android' ) > 0 );
+}
+
+function save(){
+  var canvas = document.getElementById( 'mycanvas' );
+  if( !canvas || !canvas.getContext ){
+    return false;
+  }
+  var ctx = canvas.getContext( '2d' );
+
+  //. 画像データ
+  var png = canvas.toDataURL( 'image/png' );
+  png = png.replace( /^.*,/, '' );
+
+  //. バイナリ変換
+  var bin = atob( png );
+  var buffer = new Uint8Array( bin.length );
+  for( var i = 0; i < bin.length; i ++ ){
+    buffer[i] = bin.charCodeAt( i );
+  }
+  var blob = new Blob( [buffer.buffer], {
+    type: 'image/png'
+  });
+
+  //. フォームにして送信
+  console.log( 'Sending data... : ' + blob.size );
+  var formData = new FormData();
+  formData.append( 'image', blob );    //. <form enctype='multipart/formdata'><input name='image' type='file'/> ...
+  formData.append( 'timestamp', ( new Date() ).getTime() );
+  formData.append( 'name', $('#name').text() );
+  $.ajax({
+    type: 'POST',
+    url: '/image',
+    data: formData,
+    contentType: false,
+    processData: false,
+    success: function( data, dataType ){
+      console.log( data );
+    },
+    error: function( jqXHR, textStatus, errorThrown ){
+      console.log( textStatus + ': ' + errorThrown );
+    }
+  });
+}
+
+function undo(){
+  if( undos && undos.length > 0 ){
+    var last_stroke = undos.pop();
+    if( undos.length == 0 ){
+      $('#undo_btn').prop( 'disabled', true );
+    }
+    redos.push( last_stroke );
+    $('#redo_btn').prop( 'disabled', false );
+
+    redrawCanvas();
+  }
+}
+
+function redo(){
+  if( redos && redos.length > 0 ){
+    var last_stroke = redos.pop();
+    if( redos.length == 0 ){
+      $('#redo_btn').prop( 'disabled', true );
+    }
+    undos.push( last_stroke );
+    $('#undo_btn').prop( 'disabled', false );
+
+    redrawCanvas();
+  }
+}
+
+function setBG(){
+  var color = $('#select_color').val();
+  if( color ){
+    if( color != 'transparent' ){
+      backgroundcolor = color;
+    }else{
+      backgroundcolor = null;
+    }
+    redrawCanvas();
+  }
+}
+
+function redrawCanvas(){
+  if( undos && undos.length >= 0 ){
+    resetCanvas( true );
+
+    if( backgroundcolor ){
+      var canvas = document.getElementById( 'mycanvas' );
+      if( !canvas || !canvas.getContext ){
+        return false;
+      }
+      var ctx = canvas.getContext( '2d' );
+
+      //. 全体をベタ塗り
+      ctx.beginPath();
+      ctx.fillStyle = backgroundcolor; //"rgb( 255, 255, 255 )";
+      ctx.fillRect( 0, 0, canvas.width, canvas.height );
+      ctx.stroke();
+    }
+
+    for( var i = 0; i < undos.length; i ++ ){
+      var stroke = undos[i];
+
+      for( var j = 1; j < stroke.xys.length; j ++ ){
+        var canvas = document.getElementById( 'mycanvas' );
+        if( !canvas || !canvas.getContext ){
+          return false;
+        }
+        var ctx = canvas.getContext( '2d' );
+
+        var color = stroke.color;
+        if( color == 'transparent' ){
+          ctx.globalCompositeOperation = 'destination-out';
+        }else{
+          ctx.globalCompositeOperation = 'source-over';
+        }
+
+        ctx.beginPath();
+        ctx.lineWidth = stroke.width;
+        ctx.lineCap = 'round';
+        ctx.moveTo( stroke.xys[j-1][0], stroke.xys[j-1][1] );
+        ctx.lineTo( stroke.xys[j][0], stroke.xys[j][1] );
+        if( color != 'transparent' ){
+          ctx.strokeStyle = color;
+        }
+        ctx.stroke();
+      }
+    }
+  }
+
+  sendImage();
+}
+
+function generateUUID(){
+  //. Cookie の値を調べて、有効ならその値で、空だった場合は生成する
+
+  var s = 1000;
+  return new Date().getTime().toString(16) + Math.floor( s * Math.random() ).toString(16);
+}
+
+function sendImage(){
+  //. キャンバスを取得
+  var canvas = document.getElementById( 'mycanvas' );
+  if( !canvas || !canvas.getContext ){
+    return false;
+  }
+
+  //. 画像データ
+  var png = canvas.toDataURL( 'image/png' );
+
+  //. コメント
+  var comment = $('#comment').val();
+  if( !comment ){ comment = ''; }
+
+  //. 画像を通知
+  var msg = {
+    uuid: uuid,
+    room: '<%= room %>',
+    comment: comment,
+    image_src: png
+  };
+  socketio.json.emit( 'image_client', msg );
+}
+</script>
+</body>
+</html>
